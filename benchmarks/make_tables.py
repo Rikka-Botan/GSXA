@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""benchmarks/results/*.json -> the README's latency tables (one per mode).
+"""benchmarks/results/*.json -> the README's speed table.
 
     python benchmarks/make_tables.py benchmarks/results/cuda.json
 """
@@ -15,26 +15,18 @@ NAMES = {"gsxa": "GSXA", "gated": "Gated Attention", "xsa": "XSA",
 
 def main(path):
     data = json.loads(open(path, encoding="utf-8").read())
-    env, rows = data["env"], data["rows"]
+    env, rows = data["env"], {r["type"]: r for r in data["rows"]}
+    types = [t for t in NAMES if t in rows]
     print(f"_{env['device']}, torch {env['torch']} (CUDA {env['cuda']}), {env['dtype']}, "
-          f"median of {env['iters']} forwards after {env['warmup']} warm-up._\n")
-    cell = {(r["type"], r["mode"], r["shape"]): r for r in rows}
-    types = [t for t in NAMES if any(r["type"] == t for r in rows)]
-    shapes = list(dict.fromkeys(r["shape"] for r in rows))
-    for mode in dict.fromkeys(r["mode"] for r in rows):
-        title = "`torch.compile`" if mode == "compile" else "eager"
-        print(f"Latency (ms) and throughput (k tokens/s), {title}. Last column: GSXA vs GQA.\n")
-        print("| batch x length | " + " | ".join(NAMES[t] for t in types) + " | GSXA overhead |")
-        print("|---|" + "---:|" * (len(types) + 1))
-        for s in shapes:
-            cells = []
-            for t in types:
-                r = cell.get((t, mode, s))
-                cells.append(f"{r['ms']:.2f} ({r['ktok_s']:.0f}k)" if r else "--")
-            g, b = cell.get(("gsxa", mode, s)), cell.get(("gqa", mode, s))
-            over = f"{100 * (g['ms'] / b['ms'] - 1):+.1f}%" if g and b else "--"
-            print(f"| {s.replace('x', ' x ')} | " + " | ".join(cells) + f" | {over} |")
-        print()
+          f"{env['mode']}, {env['shape']}; {env['rounds']} rounds x median of "
+          f"{env['iters']} forwards; mean ± 95% CI over rounds._\n")
+    print("| | " + " | ".join(NAMES[t] for t in types) + " |")
+    print("|:--|" + "--:|" * len(types))
+    print("| latency (ms) | " + " | ".join(
+        f"{rows[t]['ms']:.2f} ± {rows[t]['ms_ci95']:.2f}" for t in types) + " |")
+    print("| vs GQA | " + " | ".join(
+        f"{rows[t]['vs_gqa_pct']:+.2f} ± {rows[t]['vs_gqa_pct_ci95']:.2f} %"
+        if "vs_gqa_pct" in rows[t] else "—" for t in types) + " |")
 
 
 if __name__ == "__main__":

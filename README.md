@@ -132,17 +132,18 @@ evaluation windows and masks.
 
 ## Speed
 
-Encoder forward pass at 32 × 1,024 tokens, bf16, on one RTX 5080 (median of 50 runs;
-in parentheses: the change relative to GQA).
+Encoder forward pass with `torch.compile`, 32 × 1,024 tokens, bf16, one RTX 5080.
+The models are timed in 10 interleaved rounds, each the median of 50 forwards. The
+table gives the mean ± 95 % CI over the rounds. The change vs GQA is paired within
+each round.
 
 | | GSXA | Gated Attention | XSA | Scalable GQA | GQA |
 |:--|--:|--:|--:|--:|--:|
-| `torch.compile` (ms) | 83.4 (+3.8 %) | 82.3 (+2.3 %) | 83.0 (+3.2 %) | 80.3 (−0.2 %) | 80.4 |
-| eager (ms) | 100.8 (+17.7 %) | 90.2 (+5.4 %) | 96.4 (+12.6 %) | 89.7 (+4.7 %) | 85.6 |
+| latency (ms) | 82.14 ± 0.09 | 81.14 ± 0.08 | 81.70 ± 0.08 | 80.29 ± 0.08 | 80.22 ± 0.07 |
+| vs GQA | +2.39 ± 0.11 % | +1.14 ± 0.11 % | +1.84 ± 0.11 % | +0.08 ± 0.11 % | — |
 
-GSXA's extra operations are elementwise. Compiled, they fuse into neighbouring
-kernels, so use `torch.compile`
-(`python benchmarks/benchmark_inference.py --shapes 32x1024`).
+To reproduce: `python benchmarks/benchmark_inference.py`, then
+`python benchmarks/make_tables.py <result json>`.
 
 ## Usage
 
