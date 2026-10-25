@@ -117,10 +117,6 @@ length, 20 measurements of 65,536 tokens with 15 % masking, reported as mean ± 
 The metrics are pseudo-perplexity (PPPL, Salazar et al., 2020) and MLM accuracy. Raw
 scores are in [`results/attention_ablation/`](results/attention_ablation).
 
-These models were trained with the earlier, linear form of the gate: $`g^{(1)}`$
-without the sigmoid, which is `gate_activation="linear"`. The sigmoid gate described
-above has not been trained at this scale yet.
-
 **Table 1.** Masked-LM quality by sequence length († = beyond the training length;
 bold = best in the column).
 
