@@ -61,8 +61,19 @@ def test_default_is_the_ablation_model():
     assert sizes["xsa"] == sizes["scalable_gqa"] == sizes["gqa"] + 12 * 2
 
 
+def test_gate_is_a_sigmoid_by_default():
+    assert GSXAConfig().gate_activation == "sigmoid"
+    torch.manual_seed(0)
+    attn = GSXAAttention(tiny(attention_type="gated"))
+    o, v = torch.randn(2, 5, 64), torch.randn(2, 5, 2, 16)
+    g1 = torch.sigmoid(attn.Wg(o))
+    want = (g1.unsqueeze(-1) * o.view(2, 5, 4, 16)).reshape(2, 5, 64)
+    assert torch.allclose(attn.output_transform(o, v), want, atol=1e-6)
+
+
 def test_invalid_configs_are_rejected():
     for bad in (dict(num_key_value_heads=3), dict(attention_type="sigmoid"),
+                dict(gate_activation="relu"),
                 dict(sf_s=0.0), dict(sf_base=-1.0), dict(classifier_pooling="max")):
         with pytest.raises(ValueError):
             tiny(**bad)
@@ -81,10 +92,12 @@ def test_each_type_registers_only_what_it_uses():
 
 def per_head_reference(attn, o, v):
     """The README's equations, one query head at a time (no reshapes shared with the
-    implementation): kappa(h) = h // G, vhat the unit own value."""
+    implementation): kappa(h) = h // G, vhat the unit own value, act = sigmoid (or the
+    identity under gate_activation="linear")."""
     B, T, C = o.shape
     H, D, G = attn.n_head, attn.head_dim, attn.n_group
     g = attn.Wg(o) if attn.Wg is not None else None
+    act = torch.sigmoid if attn.gate_activation == "sigmoid" else (lambda x: x)
     out = torch.empty_like(o)
     for h in range(H):
         oh = o[..., h * D:(h + 1) * D]
@@ -92,9 +105,9 @@ def per_head_reference(attn, o, v):
         dot = (oh * vhat).sum(-1, keepdim=True)
         if attn.kind == "gsxa":
             g1, g2 = g[..., h:h + 1], g[..., H + h:H + h + 1]
-            z = g1 * (oh - torch.tanh(g2) * dot * vhat)
+            z = act(g1) * (oh - torch.tanh(g2) * dot * vhat)
         elif attn.kind == "gated":
-            z = g[..., h:h + 1] * oh
+            z = act(g[..., h:h + 1]) * oh
         elif attn.kind == "xsa":
             z = oh - dot * vhat
         else:
@@ -103,10 +116,11 @@ def per_head_reference(attn, o, v):
     return out
 
 
+@pytest.mark.parametrize("activation", ["sigmoid", "linear"])
 @pytest.mark.parametrize("kind", ATTENTION_TYPES)
-def test_output_transform_matches_the_equations(kind):
+def test_output_transform_matches_the_equations(kind, activation):
     torch.manual_seed(0)
-    attn = GSXAAttention(tiny(attention_type=kind))
+    attn = GSXAAttention(tiny(attention_type=kind, gate_activation=activation))
     if attn.Wg is not None:
         torch.nn.init.normal_(attn.Wg.weight, std=0.5)
     o, v = torch.randn(2, 5, 64), torch.randn(2, 5, 2, 16)
@@ -260,15 +274,17 @@ def to_nexterabert_v2(model):
     config = dict(n_layer=cfg.num_hidden_layers, n_head=H, n_kv_head=Hkv,
                   n_embd=cfg.hidden_size, n_inter=cfg.intermediate_size,
                   vocab_size=cfg.vocab_size, block_types=["attn"] * cfg.num_hidden_layers,
-                  ssmax_mode=ssmax, attn_gate=gate, attn_qk_norm="none", mudd_dim=0,
+                  ssmax_mode=ssmax, attn_gate=gate, gate_activation=cfg.gate_activation,
+                  attn_qk_norm="none", mudd_dim=0,
                   mudd_layers=[], mlp_class="mlp", rope_base=cfg.rope_theta,
                   rope_ntk_train_len=0, tie_word_embeddings=True, pad_token_id=0,
                   cls_token_id=1, sep_token_id=2, mask_token_id=3)
     return enc, head, config
 
 
+@pytest.mark.parametrize("activation", ["sigmoid", "linear"])
 @pytest.mark.parametrize("kind", ATTENTION_TYPES)
-def test_converter_round_trip(tmp_path, kind):
+def test_converter_round_trip(tmp_path, kind, activation):
     import json
 
     from safetensors.torch import save_file
@@ -276,7 +292,7 @@ def test_converter_round_trip(tmp_path, kind):
     from convert_nexterabert_v2 import convert
 
     torch.manual_seed(0)
-    model = GSXAForMaskedLM(tiny(attention_type=kind)).eval()
+    model = GSXAForMaskedLM(tiny(attention_type=kind, gate_activation=activation)).eval()
     enc, head, config = to_nexterabert_v2(model)
     src = tmp_path / "v2"
     src.mkdir()
@@ -285,9 +301,21 @@ def test_converter_round_trip(tmp_path, kind):
     (src / "config.json").write_text(json.dumps(config), encoding="utf-8")
     converted = convert(src, tmp_path / "gsxa").eval()
     assert converted.config.attention_type == kind
+    assert converted.config.gate_activation == activation
     ids = batch()
     with torch.no_grad():
         assert torch.equal(converted(input_ids=ids).logits, model(input_ids=ids).logits)
+
+
+def test_converter_reads_old_exports_as_linear_gates():
+    """An export without gate_activation predates the sigmoid gate (2026-10-26)."""
+    from convert_nexterabert_v2 import gsxa_config
+
+    src = dict(n_layer=2, n_head=4, n_kv_head=2, n_embd=64, n_inter=128, vocab_size=128,
+               block_types=["attn", "attn"], ssmax_mode="sssmax", attn_gate="exclusive",
+               attn_qk_norm="none", mudd_dim=0, mudd_layers=[])
+    assert gsxa_config(src).gate_activation == "linear"
+    assert gsxa_config({**src, "gate_activation": "sigmoid"}).gate_activation == "sigmoid"
 
 
 def test_converter_refuses_other_architectures():

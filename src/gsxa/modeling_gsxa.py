@@ -11,11 +11,11 @@ GSXA attention, per query head ``h`` (KV head ``kappa(h) = h // (H / H_kv)``)::
     o^h      = softmax(lambda q^h K^T / sqrt(D)) V          rotary q, k; GQA K, V
     g1, g2   = split(W_G [o^1; ...; o^H])                   one scalar each, per head
     vhat     = v_t^{kappa(h)} / ||v_t^{kappa(h)}||          the token's OWN value
-    z^h      = g1^h (o^h - tanh(g2^h) <o^h, vhat> vhat)
+    z^h      = sigmoid(g1^h) (o^h - tanh(g2^h) <o^h, vhat> vhat)
     y        = W_O [z^1; ...; z^H]
 
 ``attention_type`` selects GSXA or one of the variants it is compared with: "gated"
-(``z = g1 o``), "xsa" (``z = o - <o, vhat> vhat``), "scalable_gqa" (``z = o``) and
+(``z = sigmoid(g1) o``), "xsa" (``z = o - <o, vhat> vhat``), "scalable_gqa" (``z = o``) and
 "gqa" (``z = o`` and ``lambda = 1``). See the README for the full definitions.
 """
 
@@ -177,10 +177,16 @@ class GSXAAttention(nn.Module):
         gate_out = {"gsxa": 2 * self.n_head, "gated": self.n_head}.get(self.kind)
         self.Wg = (nn.Linear(config.hidden_size, gate_out, bias=False)
                    if gate_out is not None else None)
+        self.gate_activation = config.gate_activation
         self.scalable_factor = GSXAScalableFactor(config) if self.kind != "gqa" else None
 
     def extra_repr(self) -> str:
         return f"attention_type={self.kind!r}"
+
+    def _activate(self, g1: torch.Tensor) -> torch.Tensor:
+        """The per-head gate: ``sigmoid(g1)``, or ``g1`` itself under
+        ``gate_activation="linear"`` (the form the ablation checkpoints used)."""
+        return torch.sigmoid(g1) if self.gate_activation == "sigmoid" else g1
 
     def output_transform(self, o: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         """``o`` (B, T, H * D) attention output, ``v`` (B, T, H_kv, D) own values ->
@@ -193,9 +199,10 @@ class GSXAAttention(nn.Module):
             return exclusive_projection(oh, v).reshape(B, T, C)
         g = self.Wg(o)
         if self.kind == "gated":
-            g1 = g.view(B, T, self.n_kv_head, self.n_group)
+            g1 = self._activate(g.view(B, T, self.n_kv_head, self.n_group))
             return (g1.unsqueeze(-1) * oh).reshape(B, T, C)
         g1, g2 = (x.view(B, T, self.n_kv_head, self.n_group) for x in g.chunk(2, dim=-1))
+        g1 = self._activate(g1)
         z = exclusive_projection(oh, v, torch.tanh(g2))
         return (g1.unsqueeze(-1) * z).reshape(B, T, C)
 

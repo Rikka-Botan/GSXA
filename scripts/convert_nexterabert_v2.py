@@ -89,6 +89,8 @@ def gsxa_config(src: dict) -> GSXAConfig:
         num_key_value_heads=int(src["n_kv_head"]),
         intermediate_size=int(src["n_inter"]),
         attention_type=ATTENTION[key],
+        # an export without the key predates sigmoid gates (2026-10-26): its g1 is linear
+        gate_activation=src.get("gate_activation", "linear"),
         sf_s=float(src.get("ssmax_s", 0.43)),
         sf_b=float(src.get("ssmax_b", 0.1)),
         sf_base=float(src.get("ssmax_base", 0.1)),

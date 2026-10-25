@@ -13,12 +13,16 @@ except ImportError:  # pragma: no cover - newer alias
 # only in the attention's length scaling and output transform:
 #
 #   name            scalable factor   XSA projection        per-head gate
-#   "gsxa"          yes               learned, tanh(g2)     g1      (proposed)
-#   "gated"         yes               --                    g1      "Gated Attention"
+#   "gsxa"          yes               learned, tanh(g2)     sigmoid(g1)  (proposed)
+#   "gated"         yes               --                    sigmoid(g1)  "Gated Attention"
 #   "xsa"           yes               full, parameter-free  --      "XSA"
 #   "scalable_gqa"  yes               --                    --      "Scalable GQA"
 #   "gqa"           --                --                    --      "GQA" (RoPE + GQA)
 ATTENTION_TYPES = ("gsxa", "gated", "xsa", "scalable_gqa", "gqa")
+# Activation of the per-head gate g1 (``gate_activation``): "sigmoid" (default) or
+# "linear" (g1 as is) -- the form the checkpoints of the README's ablation were
+# trained with; the converter sets it for them.
+GATE_ACTIVATIONS = ("sigmoid", "linear")
 CLASSIFIER_POOLINGS = ("mean", "cls")
 
 # Written into every saved config.json, so a checkpoint saved from any one head loads
@@ -71,6 +75,7 @@ class GSXAConfig(PretrainedConfig):
         num_key_value_heads: int = 4,
         intermediate_size: int = 2304,
         attention_type: str = "gsxa",
+        gate_activation: str = "sigmoid",
         sf_s: float = 0.43,
         sf_b: float = 0.1,
         sf_base: float = 0.1,
@@ -112,7 +117,11 @@ class GSXAConfig(PretrainedConfig):
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
         self.intermediate_size = intermediate_size
+        if gate_activation not in GATE_ACTIVATIONS:
+            raise ValueError(f"gate_activation must be one of {GATE_ACTIVATIONS}, "
+                             f"got {gate_activation!r}")
         self.attention_type = attention_type
+        self.gate_activation = gate_activation
         self.sf_s = float(sf_s)
         self.sf_b = float(sf_b)
         self.sf_base = float(sf_base)
@@ -143,4 +152,4 @@ class GSXAConfig(PretrainedConfig):
         return cls(**{**PRESETS[name], **overrides})
 
 
-__all__ = ["GSXAConfig", "ATTENTION_TYPES", "CLASSIFIER_POOLINGS", "PRESETS", "AUTO_MAP"]
+__all__ = ["GSXAConfig", "ATTENTION_TYPES", "GATE_ACTIVATIONS", "CLASSIFIER_POOLINGS", "PRESETS", "AUTO_MAP"]

@@ -8,7 +8,7 @@ accuracy. It adds three components to scaled dot-product attention:
 * a **scalable factor**: a learned, length-dependent query scale;
 * an **exclusive projection**: removes, to a learned degree, the part of each head's
   output that points along the token's own value;
-* a **per-head gate**.
+* a **per-head sigmoid gate**.
 
 This repository implements GSXA (PyTorch + 🤗 `transformers`) together with the four
 attentions it is compared with, and reports a controlled comparison in a masked-LM
@@ -66,7 +66,7 @@ concatenated head outputs gives two gate values per head:
 ```
 
 ```math
-z_{i,t} = g^{(1)}_{i,t} \left( y_{i,t} - \tanh\left(g^{(2)}_{i,t}\right)
+z_{i,t} = \sigma\left(g^{(1)}_{i,t}\right) \left( y_{i,t} - \tanh\left(g^{(2)}_{i,t}\right)
 \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t} \right),
 \qquad
 \mathrm{GSXA}(X) = \mathrm{Concat}(Z_1, \dots, Z_h) W^O,
@@ -76,9 +76,10 @@ where $`Z_i`$ stacks the $`z_{i,t}`$ over the positions.
 
 * **What it does.** Split $`y_{i,t}`$ into a part orthogonal to $`v_{i,t}`$ ($`y^\perp`$)
   and a part parallel to it ($`y^\parallel`$). Then
-  $`z_{i,t} = g^{(1)}_{i,t}\left(y^{\perp} + \left(1 - \tanh g^{(2)}_{i,t}\right) y^{\parallel}\right)`$.
+  $`z_{i,t} = \sigma(g^{(1)}_{i,t})\left(y^{\perp} + \left(1 - \tanh g^{(2)}_{i,t}\right) y^{\parallel}\right)`$.
   Each head always passes on what the context adds. It learns how much of the token's
-  own value to keep: none (XSA's choice), all ($`g^{(2)} = 0`$), or more.
+  own value to keep: none (XSA's choice), all ($`g^{(2)} = 0`$), or more. The sigmoid
+  gate $`\sigma(g^{(1)}) \in (0, 1)`$ then scales the head.
 * **Cost.** $`W^G`$ and the two scalars of $`\lambda_n`$ add 0.22 % parameters at the size
   used below.
 * **Code.** `GSXAAttention` in [`src/gsxa/modeling_gsxa.py`](src/gsxa/modeling_gsxa.py).
@@ -90,8 +91,8 @@ All five methods share everything except ① and ②. Select one with
 
 | Name | `attention_type` | logit scale | head output $`z_{i,t}`$ |
 |:--|:--|:--:|:--|
-| **GSXA** | `gsxa` | $`\lambda_n`$ | $`g^{(1)}_{i,t} \left( y_{i,t} - \tanh(g^{(2)}_{i,t}) \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t} \right)`$ |
-| Gated Attention | `gated` | $`\lambda_n`$ | $`g^{(1)}_{i,t} y_{i,t}`$ |
+| **GSXA** | `gsxa` | $`\lambda_n`$ | $`\sigma(g^{(1)}_{i,t}) \left( y_{i,t} - \tanh(g^{(2)}_{i,t}) \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t} \right)`$ |
+| Gated Attention | `gated` | $`\lambda_n`$ | $`\sigma(g^{(1)}_{i,t}) y_{i,t}`$ |
 | XSA | `xsa` | $`\lambda_n`$ | $`y_{i,t} - \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t}`$ |
 | Scalable GQA | `scalable_gqa` | $`\lambda_n`$ | $`y_{i,t}`$ |
 | GQA | `gqa` | $`1`$ | $`y_{i,t}`$ |
@@ -100,9 +101,10 @@ All five methods share everything except ① and ②. Select one with
 * **Scalable GQA**: GQA with the scalable factor ①.
 * **XSA**: Exclusive Self Attention (Zhai, 2026), $`z_i = y_i - \frac{y_i^\top v_i}{\lVert v_i \rVert^2} v_i`$,
   applied per head.
-* **Gated Attention**: GSXA's gate alone, $`g^{(1)}`$ computed from the head outputs.
-  It differs from the gate of Qiu et al. (2025), $`Y' = Y \odot \sigma(X W_\theta)`$,
-  which is a sigmoid of the layer input.
+* **Gated Attention**: GSXA's gate alone, $`\sigma(g^{(1)})`$ per head with
+  $`g^{(1)}`$ computed from the head outputs. Qiu et al. (2025),
+  $`Y' = Y \odot \sigma(X W_\theta)`$, also use a sigmoid but compute it from the layer
+  input.
 
 ## Results
 
@@ -114,6 +116,10 @@ rate 6 × 10⁻⁴ with cosine decay, seed 1234. Evaluation uses held-out text: 
 length, 20 measurements of 65,536 tokens with 15 % masking, reported as mean ± 95 % CI.
 The metrics are pseudo-perplexity (PPPL, Salazar et al., 2020) and MLM accuracy. Raw
 scores are in [`results/attention_ablation/`](results/attention_ablation).
+
+These models were trained with the earlier, linear form of the gate: $`g^{(1)}`$
+without the sigmoid, which is `gate_activation="linear"`. The sigmoid gate described
+above has not been trained at this scale yet.
 
 **Table 1.** Masked-LM quality by sequence length († = beyond the training length;
 bold = best in the column).
