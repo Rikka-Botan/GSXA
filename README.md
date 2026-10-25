@@ -1,3 +1,5 @@
+<img width="3182" height="1313" alt="GSXA" src="https://github.com/user-attachments/assets/9d079d53-7174-495d-9ef7-bae204115798" />
+
 # GSXA: Gated Scalable Exclusive Self Attention
 
 **GSXA** is a drop-in replacement for softmax self-attention that aims at higher
