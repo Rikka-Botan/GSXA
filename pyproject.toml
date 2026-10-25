@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gsxa"
+version = "0.1.0"
+description = "GSXA: Gated Scalable Exclusive Self Attention, in a BERT-style GQA + RoPE + ReLU^2 encoder (inference code)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.4",
+    "transformers>=5.0",
+    "safetensors>=0.4",
+]
+
+[project.optional-dependencies]
+bench = ["matplotlib>=3.7"]
+test = ["pytest>=8.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gsxa"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
