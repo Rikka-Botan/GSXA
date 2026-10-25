@@ -24,62 +24,85 @@ pseudo-perplexity reduction (top) and MLM-accuracy gain (bottom).
 
 ## Method
 
-For an input $X \in \mathbb{R}^{T \times d}$ with $H$ query heads of width $D$
-sharing $H_{kv}$ KV heads (query head $h$ reads KV head $\kappa(h)$), and $n$
-non-padding tokens:
-
-**① Scalable factor.** Each layer learns $s$ and $b$, with a fixed floor
-$\beta = 0.1$, and scales the queries:
+**Baseline: multi-head attention with GQA.** For an input $X \in \mathbb{R}^{n \times d}$
+with $h$ heads of dimension $d_k$, grouped-query attention (Ainslie et al., 2023)
+shares the keys and values of the heads within a group, with $\kappa(i)$ the group of
+head $i$ (Vaswani et al., 2017):
 
 $$
-\lambda(n) = s \log n + \beta + \mathrm{ReLU}(b), \qquad
-o_t^h = \sum_j \mathrm{softmax}_j\!\left(\frac{\lambda(n)\,\langle \tilde q_t^h, \tilde k_j^{\kappa(h)} \rangle}{\sqrt{D}}\right) v_j^{\kappa(h)}
+Q_i = X W_i^Q, \quad K_i = X W_{\kappa(i)}^K, \quad V_i = X W_{\kappa(i)}^V,
 $$
 
-($\tilde q, \tilde k$: rotary-embedded). The factor keeps attention sharp as $n$ grows,
-as in Scalable-Softmax, and the floor keeps $\lambda \ge \beta > 0$ at every length.
-
-**② Exclusive projection and gate.** With
-$\hat v_t^h = v_t^{\kappa(h)} / \lVert v_t^{\kappa(h)} \rVert$ the direction of the
-token's own value and $[g_{1,t}; g_{2,t}] = W_G\, [o_t^1; \dots; o_t^H] \in \mathbb{R}^{2H}$:
-
 $$
-z_t^h = g_{1,t}^h \Big( o_t^h - \tanh\!\big(g_{2,t}^h\big)\,
-\big\langle o_t^h, \hat v_t^h \big\rangle\, \hat v_t^h \Big),
-\qquad y_t = W_O\, [z_t^1; \dots; z_t^H].
+\mathrm{head}_i = \mathrm{softmax}\left(\frac{Q_i K_i^\top}{\sqrt{d_k}}\right) V_i,
+\qquad
+\mathrm{MultiHead}(X) = \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h)\, W^O .
 $$
 
-Writing $o = o_\perp + o_\parallel$ (orthogonal to and along $\hat v$), this is
-$z = g_1 \big(o_\perp + (1 - \tanh g_2)\, o_\parallel\big)$. Each head always passes
-on what the context adds ($o_\perp$). It learns per token how much of the token's own
-information to keep: none ($\tanh g_2 \to 1$, as in XSA), all ($g_2 = 0$), or more.
-$g_1$ then scales the head.
+RoPE (Su et al., 2021) is applied to $Q_i$ and $K_i$. GSXA changes this in two places.
 
-**Cost.** $W_G \in \mathbb{R}^{2H \times d}$ plus two scalars per layer: +0.22 %
-parameters at the size below.
+**① Scalable factor.** Following Scalable-Softmax (Nakanishi, 2025), the attention
+logits are multiplied by a factor that grows with the number of keys $n$:
 
-The implementation is `GSXAAttention` in
-[`src/gsxa/modeling_gsxa.py`](src/gsxa/modeling_gsxa.py).
+$$
+\mathrm{head}_i = \mathrm{softmax}\left(\lambda_n \frac{Q_i K_i^\top}{\sqrt{d_k}}\right) V_i,
+\qquad
+\lambda_n = s \log n + \beta + \mathrm{ReLU}(b),
+$$
+
+* $s$ and $b$ are learned per layer, and $\beta = 0.1$ is fixed.
+* $n$ counts the non-padding tokens.
+* SSMax is the case $\lambda_n = s \log n$. The added $\beta + \mathrm{ReLU}(b)$ keeps
+  $\lambda_n \ge \beta > 0$ at every length.
+
+**② Exclusive projection and gate.** Let $y_{i,t}$ be the output of head $i$ at
+position $t$ (row $t$ of $\mathrm{head}_i$), and $v_{i,t}$ the value of the same token
+(row $t$ of $V_i$). A projection $W^G \in \mathbb{R}^{d \times 2h}$ of the
+concatenated head outputs gives two gate values per head:
+
+$$
+\left[\, g^{(1)}_{t},\ g^{(2)}_{t} \,\right] =
+\mathrm{Concat}(y_{1,t}, \dots, y_{h,t})\, W^G, \qquad g^{(1)}_t, g^{(2)}_t \in \mathbb{R}^{h},
+$$
+
+$$
+z_{i,t} = g^{(1)}_{i,t} \left( y_{i,t} - \tanh\left(g^{(2)}_{i,t}\right)
+\frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2}\, v_{i,t} \right),
+\qquad
+\mathrm{GSXA}(X) = \mathrm{Concat}(Z_1, \dots, Z_h)\, W^O,
+$$
+
+where $Z_i$ stacks the $z_{i,t}$ over the positions.
+
+* **What it does.** Split $y_{i,t}$ into a part orthogonal to $v_{i,t}$ ($y^\perp$)
+  and a part parallel to it ($y^\parallel$). Then
+  $z_{i,t} = g^{(1)}_{i,t}\left(y^{\perp} + \left(1 - \tanh g^{(2)}_{i,t}\right) y^{\parallel}\right)$.
+  Each head always passes on what the context adds. It learns how much of the token's
+  own value to keep: none (XSA's choice), all ($g^{(2)} = 0$), or more.
+* **Cost.** $W^G$ and the two scalars of $\lambda_n$ add 0.22 % parameters at the size
+  used below.
+* **Code.** `GSXAAttention` in [`src/gsxa/modeling_gsxa.py`](src/gsxa/modeling_gsxa.py).
 
 ## Compared methods
 
-All five share everything except ① and ②; select one with
+All five methods share everything except ① and ②. Select one with
 `GSXAConfig(attention_type=...)`.
 
-| Name | `attention_type` | ① query scale | ② head output $z^h$ |
+| Name | `attention_type` | logit scale | head output $z_{i,t}$ |
 |:--|:--|:--:|:--|
-| **GSXA** | `gsxa` | $\lambda(n)$ | $g_1^h\,(o^h - \tanh(g_2^h) \langle o^h, \hat v^h \rangle \hat v^h)$ |
-| Gated Attention | `gated` | $\lambda(n)$ | $g_1^h\, o^h$ |
-| XSA | `xsa` | $\lambda(n)$ | $o^h - \langle o^h, \hat v^h \rangle \hat v^h$ |
-| Scalable GQA | `scalable_gqa` | $\lambda(n)$ | $o^h$ |
-| GQA | `gqa` | $1$ | $o^h$ |
+| **GSXA** | `gsxa` | $\lambda_n$ | $g^{(1)}_{i,t} \left( y_{i,t} - \tanh(g^{(2)}_{i,t}) \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t} \right)$ |
+| Gated Attention | `gated` | $\lambda_n$ | $g^{(1)}_{i,t}\, y_{i,t}$ |
+| XSA | `xsa` | $\lambda_n$ | $y_{i,t} - \frac{y_{i,t}^\top v_{i,t}}{\lVert v_{i,t} \rVert^2} v_{i,t}$ |
+| Scalable GQA | `scalable_gqa` | $\lambda_n$ | $y_{i,t}$ |
+| GQA | `gqa` | $1$ | $y_{i,t}$ |
 
 * **GQA**: grouped-query attention with RoPE (Ainslie et al., 2023; Su et al., 2021).
-* **Scalable GQA**: GQA with the scalable factor, Scalable-Softmax (Nakanishi, 2025)
-  plus the floor $\beta + \mathrm{ReLU}(b)$.
-* **XSA**: Exclusive Self Attention (Zhai, 2026), in its parameter-free form.
-* **Gated Attention**: GSXA's gate alone. It is linear, per head and computed from the
-  attention output. It is not the sigmoid gate on the layer input of Qiu et al. (2025).
+* **Scalable GQA**: GQA with the scalable factor ①.
+* **XSA**: Exclusive Self Attention (Zhai, 2026), $z_i = y_i - \frac{y_i^\top v_i}{\lVert v_i \rVert^2} v_i$,
+  applied per head.
+* **Gated Attention**: GSXA's gate alone, $g^{(1)}$ computed from the head outputs.
+  It differs from the gate of Qiu et al. (2025), $Y' = Y \odot \sigma(X W_\theta)$,
+  which is a sigmoid of the layer input.
 
 ## Results
 
@@ -179,6 +202,7 @@ model = GSXAForMaskedLM.from_pretrained("path/to/checkpoint", dtype=torch.bfloat
 * Z. Qiu et al. *Gated Attention for Large Language Models: Non-linearity, Sparsity,
   and Attention-Sink-Free.* arXiv:2505.06708, 2025.
 * K. M. Nakanishi. *Scalable-Softmax Is Superior for Attention.* arXiv:2501.19399, 2025.
+* A. Vaswani et al. *Attention Is All You Need.* NeurIPS 2017.
 * J. Ainslie et al. *GQA: Training Generalized Multi-Query Transformer Models from
   Multi-Head Checkpoints.* arXiv:2305.13245, 2023.
 * J. Su et al. *RoFormer: Enhanced Transformer with Rotary Position Embedding.*
