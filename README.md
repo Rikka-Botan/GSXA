@@ -8,6 +8,17 @@ changes to standard scaled dot-product attention:
   head's output that points along the token's *own* value vector;
 * a **per-head gate** on the result.
 
+<p align="center">
+  <img src="docs/figures/fig1_bars_summary.png" alt="GSXA reduces pseudo-perplexity by 11.3 % and raises MLM accuracy by 1.27 points over GQA, more than Gated Attention, XSA or Scalable GQA" width="60%">
+</p>
+
+**Figure 1.** GSXA and the attentions it is compared with, as ~100 M-parameter
+encoders trained identically on 1 B tokens. Each bar is the gain over plain GQA,
+averaged over sequence lengths 64–4,096: the reduction of masked-LM
+pseudo-perplexity (top; geometric mean) and the gain in MLM accuracy (bottom). GSXA
+leads on both. [Results](#results) has the setup and every length.
+[PDF](docs/figures/fig1_bars_summary.pdf)
+
 This repository contains **inference code** (PyTorch + 🤗 `transformers`):
 
 * a BERT-style masked-language-model encoder (grouped-query attention + RoPE +
@@ -96,14 +107,14 @@ $\beta = 0.1$. The queries of a sequence with $n = \sum_j m_j$ non-padding token
 are scaled by
 
 $$
-\lambda_\ell(n) = s_\ell \log n + \beta + \operatorname{ReLU}(b_\ell),
+\lambda_\ell(n) = s_\ell \log n + \beta + \mathrm{ReLU}(b_\ell),
 \qquad s_\ell^{(0)} = 0.43,\quad b_\ell^{(0)} = 0.1 .
 $$
 
 The attention weights and the per-head output are then
 
 $$
-a_{ts}^h = \operatorname*{softmax}_{s:\,m_s = 1}
+a_{ts}^h = \mathrm{softmax}_{s:\,m_s = 1}
 \left( \frac{\lambda_\ell(n)\, \langle \tilde q_t^h, \tilde k_s^{\kappa(h)} \rangle}{\sqrt{D}} \right),
 \qquad
 o_t^h = \sum_s a_{ts}^h\, v_s^{\kappa(h)} \in \mathbb{R}^D .
@@ -113,7 +124,7 @@ $$
   Nakanishi (2025) calls this *attention fading*. Scaling the logits by
   $s \log n$ keeps the distribution about as peaked at any length.
 * **Why the floor.** Plain $s \log n$ is $0$ at $n = 1$. With the floor $\beta$ and
-  the non-negative $\operatorname{ReLU}(b)$, $\lambda \ge \beta > 0$ at every length
+  the non-negative $\mathrm{ReLU}(b)$, $\lambda \ge \beta > 0$ at every length
   and for any learned $b$: the scale cannot vanish or change sign.
 * **What $n$ counts.** $n$ is the number of real keys, so a padded sequence is
   treated exactly as the same sequence alone.
@@ -132,10 +143,8 @@ $$
 GSXA replaces each head's output by
 
 $$
-\boxed{\;
 z_t^h = g_{1,t}^h \Big( o_t^h - \tanh\!\big(g_{2,t}^h\big)\,
 \big\langle o_t^h, \hat v_t^h \big\rangle\, \hat v_t^h \Big)
-\;}
 \qquad\text{and}\qquad
 y_t = W_O\, [z_t^1; \dots; z_t^H].
 $$
@@ -195,10 +204,10 @@ below are the ones used throughout the results. Each is selected by
 
 | Name | `attention_type` | ① query scale $\lambda$ | ② head output $z^h$ | Parameters added per layer |
 |:--|:--|:--|:--|--:|
-| **GSXA** (proposed) | `gsxa` | $s\log n + \beta + \operatorname{ReLU}(b)$ | $g_1^h\,(o^h - \tanh(g_2^h) \langle o^h, \hat v^h \rangle \hat v^h)$ | $2Hd + 2$ = 18,434 |
-| Gated Attention | `gated` | $s\log n + \beta + \operatorname{ReLU}(b)$ | $g_1^h\, o^h$, with $[g_1^1..g_1^H] = W_G o$ | $Hd + 2$ = 9,218 |
-| XSA | `xsa` | $s\log n + \beta + \operatorname{ReLU}(b)$ | $o^h - \langle o^h, \hat v^h \rangle \hat v^h$ | 2 |
-| Scalable GQA | `scalable_gqa` | $s\log n + \beta + \operatorname{ReLU}(b)$ | $o^h$ | 2 |
+| **GSXA** (proposed) | `gsxa` | $s\log n + \beta + \mathrm{ReLU}(b)$ | $g_1^h\,(o^h - \tanh(g_2^h) \langle o^h, \hat v^h \rangle \hat v^h)$ | $2Hd + 2$ = 18,434 |
+| Gated Attention | `gated` | $s\log n + \beta + \mathrm{ReLU}(b)$ | $g_1^h\, o^h$, with $[g_1^1..g_1^H] = W_G o$ | $Hd + 2$ = 9,218 |
+| XSA | `xsa` | $s\log n + \beta + \mathrm{ReLU}(b)$ | $o^h - \langle o^h, \hat v^h \rangle \hat v^h$ | 2 |
+| Scalable GQA | `scalable_gqa` | $s\log n + \beta + \mathrm{ReLU}(b)$ | $o^h$ | 2 |
 | GQA | `gqa` | $1$ | $o^h$ | — |
 
 **GQA**: grouped-query attention (Ainslie et al., 2023) with rotary positions
@@ -207,7 +216,7 @@ every other model is measured against.
 
 **Scalable GQA**: GQA with the scalable factor ①. The factor is Scalable-Softmax
 (SSMax, Nakanishi, 2025), which multiplies the attention logits by $s \log n$, plus
-the floor $\beta + \operatorname{ReLU}(b)$ described above. It isolates what the
+the floor $\beta + \mathrm{ReLU}(b)$ described above. It isolates what the
 length scaling alone contributes.
 
 **XSA**: Exclusive Self Attention (Zhai, 2026), here on top of Scalable GQA. It
@@ -285,15 +294,11 @@ dropped on conversion, and the score JSONs record the larger counts.
 
 ### Gains over GQA, 64–4,096 tokens
 
-<p align="center">
-  <img src="docs/figures/fig1_bars_summary.png" alt="Pseudo-perplexity reduction and MLM accuracy gain over GQA, averaged over 64 to 4,096 tokens" width="55%">
-</p>
-
-**Figure 1.** Gains over GQA averaged over the sequence lengths 64, 128, 256, 512,
-1,024, 2,048 and 4,096. That is the range in which GSXA has the lowest
-pseudo-perplexity at every single length. Top: geometric-mean reduction of the
-pseudo-perplexity. Bottom: mean gain in MLM accuracy (points).
-[PDF](docs/figures/fig1_bars_summary.pdf)
+[Figure 1](#gsxa-gated-scalable-exclusive-self-attention) (top of this page) averages
+the gains over GQA across the sequence lengths 64, 128, 256, 512, 1,024, 2,048 and
+4,096. That is the range in which GSXA has the lowest pseudo-perplexity at every
+single length. The pseudo-perplexity reduction is a geometric mean, the MLM-accuracy
+gain an arithmetic mean (points). The table below gives the values.
 
 <p align="center">
   <img src="docs/figures/fig2_bars_by_length.png" alt="Pseudo-perplexity reduction and MLM accuracy gain over GQA at each length from 64 to 4,096" width="100%">
