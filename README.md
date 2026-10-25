@@ -15,12 +15,12 @@ attentions it is compared with, and reports a controlled comparison in a masked-
 encoder.
 
 <p align="center">
-  <img src="docs/figures/fig1_bars_summary.png" alt="GSXA reduces pseudo-perplexity by 11.3 % and raises MLM accuracy by 1.27 points over GQA, more than Gated Attention, XSA or Scalable GQA" width="60%">
+  <img src="docs/figures/fig1_bars_summary.png" alt="GSXA reduces masked-LM perplexity by 11.3 % and raises MLM accuracy by 1.27 points over GQA, more than Gated Attention, XSA or Scalable GQA" width="60%">
 </p>
 
 **Figure 1.** Gain over plain GQA, averaged over sequence lengths 64–4,096, for
-~100 M-parameter encoders trained identically on 1 B tokens: masked-LM
-pseudo-perplexity reduction (top) and MLM-accuracy gain (bottom).
+~100 M-parameter encoders trained identically on 1 B tokens: masked-LM perplexity
+(PPL) reduction (top) and MLM-accuracy gain (bottom).
 
 ## Method
 
@@ -114,13 +114,15 @@ once, on 1 B tokens of English web and code at sequence length 1,024. The recipe
 data order are identical: masked LM with 30 % masking, batch 512, AdamW at learning
 rate 6 × 10⁻⁴ with cosine decay, seed 1234. Evaluation uses held-out text: for each
 length, 20 measurements of 65,536 tokens with 15 % masking, reported as mean ± 95 % CI.
-The metrics are pseudo-perplexity (PPPL, Salazar et al., 2020) and MLM accuracy. Raw
-scores are in [`results/attention_ablation/`](results/attention_ablation).
+The metrics are masked-LM perplexity (PPL) and MLM accuracy. PPL is the exponential
+of the mean cross-entropy over the masked tokens. MLM accuracy is the top-1 accuracy
+at those tokens. Raw scores are in
+[`results/attention_ablation/`](results/attention_ablation).
 
 **Table 1.** Masked-LM quality by sequence length († = beyond the training length;
 bold = best in the column).
 
-*Pseudo-perplexity ↓*
+*Perplexity (PPL) ↓*
 
 | Model | 64 | 128 | 256 | 512 | 1,024 | 2,048† | 4,096† |
 |:--|--:|--:|--:|--:|--:|--:|--:|
@@ -141,16 +143,16 @@ bold = best in the column).
 | GQA | 46.93 ± 0.30 | 51.70 ± 0.37 | 54.45 ± 0.32 | 55.85 ± 0.32 | 56.43 ± 0.43 | 55.58 ± 0.49 | 52.69 ± 0.81 |
 
 <p align="center">
-  <img src="docs/figures/fig2_bars_by_length.png" alt="Pseudo-perplexity reduction and MLM accuracy gain over GQA at each length from 64 to 4,096" width="100%">
+  <img src="docs/figures/fig2_bars_by_length.png" alt="Perplexity reduction and MLM accuracy gain over GQA at each length from 64 to 4,096" width="100%">
 </p>
 
 **Figure 2.** Gain over GQA at each length. The whiskers are 95 % CIs that treat the
 two models as independent; they are conservative, since all models share the
 evaluation windows and masks.
 
-* GSXA has the lowest pseudo-perplexity at every length and the highest MLM accuracy
-  at all but one (128).
-* Against GQA it reduces pseudo-perplexity by 7.0 % at the training length. The
+* GSXA has the lowest perplexity at every length and the highest MLM accuracy at all
+  but one (128).
+* Against GQA it reduces perplexity by 7.0 % at the training length. The
   intervals do not overlap there. Beyond the training length the reduction is
   11.9 % at 2,048 and 25.9 % at 4,096.
 * Against the other Scalable-GQA variants its margin at any single length is within
@@ -209,7 +211,6 @@ model = GSXAForMaskedLM.from_pretrained("path/to/checkpoint", dtype=torch.bfloat
   Multi-Head Checkpoints.* arXiv:2305.13245, 2023.
 * J. Su et al. *RoFormer: Enhanced Transformer with Rotary Position Embedding.*
   arXiv:2104.09864, 2021.
-* J. Salazar et al. *Masked Language Model Scoring.* ACL 2020.
 
 ## Citation
 

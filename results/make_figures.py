@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Figures and tables of the attention ablation (GSXA and the four compared models).
 
-Reads the five scoring JSONs in ``results/attention_ablation/`` (pseudo-perplexity and
-MLM accuracy per sequence length, each the mean and 95% Student-t CI over 20 disjoint
+Reads the five scoring JSONs in ``results/attention_ablation/`` (masked-LM perplexity,
+stored under the key "pppl", and MLM accuracy per sequence length, each the mean and
+95% Student-t CI over 20 disjoint
 measurements) and writes, for sequence lengths 64 ... 4,096, into ``docs/figures/``:
 
 * ``fig1_bars_summary.{png,pdf}`` -- gains over GQA averaged over the lengths,
@@ -72,7 +73,7 @@ def series(data, key, metric):
 
 
 def relative(data, key, metric):
-    """PPPL ratio or accuracy difference vs GQA per length, with the conservative CI."""
+    """PPL ratio or accuracy difference vs GQA per length, with the conservative CI."""
     a, ca = series(data, key, metric)
     p, cp = series(data, BASELINE, metric)
     if metric == "pppl":   # ratio, CI by the delta method
@@ -85,7 +86,7 @@ def relative(data, key, metric):
 
 
 def averages(data, key):
-    """Geometric-mean PPPL reduction (%) and mean accuracy gain (points) vs GQA."""
+    """Geometric-mean PPL reduction (%) and mean accuracy gain (points) vs GQA."""
     r, _ = relative(data, key, "pppl")
     a, _ = relative(data, key, "mlm_acc")
     return 100.0 * (1.0 - math.exp(sum(math.log(x) for x in r) / len(r))), sum(a) / len(a)
@@ -114,7 +115,7 @@ def figure_bar_summary(plt, data):
     fig, axes = plt.subplots(2, 1, figsize=(TEXT_WIDTH / 2, 2.55), constrained_layout=True)
     rows = list(range(len(arms)))[::-1]
     for ax, which, xlabel, fmt, xmax in (
-            (axes[0], 0, f"PPPL reduction vs {BASE_NAME} (%)", "{:.1f}%", 14.5),
+            (axes[0], 0, f"PPL reduction vs {BASE_NAME} (%)", "{:.1f}%", 14.5),
             (axes[1], 1, f"MLM accuracy gain vs {BASE_NAME} (pt)", "+{:.2f}", 1.6)):
         for row, (key, _label, color) in zip(rows, arms):
             v = averages(data, key)[which]
@@ -135,12 +136,12 @@ def figure_bar_summary(plt, data):
 
 
 def figure_bars(plt, data):
-    """Grouped bars: PPPL reduction and accuracy gain over GQA at each length."""
+    """Grouped bars: PPL reduction and accuracy gain over GQA at each length."""
     arms = [a for a in ARMS if a[0] != BASELINE]
     fig, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH, 2.5), constrained_layout=True)
     n, width = len(arms), 0.2
     x = list(range(len(LENGTHS)))
-    for ax, metric, ylabel in ((axes[0], "pppl", f"PPPL reduction vs {BASE_NAME} (%)"),
+    for ax, metric, ylabel in ((axes[0], "pppl", f"PPL reduction vs {BASE_NAME} (%)"),
                                (axes[1], "mlm_acc", f"MLM accuracy gain vs {BASE_NAME} (points)")):
         for i, (key, label, color) in enumerate(arms):
             r, e = relative(data, key, metric)
@@ -187,7 +188,7 @@ def latex_table(data):
         "Model & " + " & ".join(f"{L:,}" + ("$^\\dag$" if L > TRAINED_LEN else "")
                                 for L in LENGTHS) + " \\\\",
     ]
-    for metric, title, lower in (("pppl", "Pseudo-perplexity $\\downarrow$", True),
+    for metric, title, lower in (("pppl", "Perplexity (PPL) $\\downarrow$", True),
                                  ("mlm_acc", "MLM accuracy (\\%) $\\uparrow$", False)):
         lines += ["\\midrule",
                   f"\\multicolumn{{{len(LENGTHS) + 1}}}{{l}}{{\\textit{{{title}}}}} \\\\"]
@@ -202,11 +203,11 @@ def latex_table(data):
 
 
 def markdown_tables(data):
-    """The README's tables: per-length PPPL and accuracy (mean +/- CI; bold = best in
+    """The README's tables: per-length PPL and accuracy (mean +/- CI; bold = best in
     the column) and the averages of Figure 1."""
     out = []
     head = " | ".join(f"{L:,}" + ("†" if L > TRAINED_LEN else "") for L in LENGTHS)
-    for metric, title, lower in (("pppl", "Pseudo-perplexity ↓", True),
+    for metric, title, lower in (("pppl", "Perplexity (PPL) ↓", True),
                                  ("mlm_acc", "MLM accuracy (%) ↑", False)):
         vals = {k: series(data, k, metric) for k, *_ in ARMS}
         out += [f"*{title}*", "", f"| Model | {head} |", "|:--|" + "--:|" * len(LENGTHS)]
@@ -217,7 +218,7 @@ def markdown_tables(data):
                      for i, c in enumerate(cells)]
             out.append(f"| {label} | " + " | ".join(cells) + " |")
         out.append("")
-    out += ["| Model | PPPL reduction vs GQA (geo. mean) | MLM accuracy gain vs GQA (mean) |",
+    out += ["| Model | PPL reduction vs GQA (geo. mean) | MLM accuracy gain vs GQA (mean) |",
             "|:--|--:|--:|"]
     for key, label, _c in ARMS:
         if key != BASELINE:
