@@ -19,9 +19,9 @@ except ImportError:  # pragma: no cover - newer alias
 #   "scalable_gqa"  yes               --                    --      "Scalable GQA"
 #   "gqa"           --                --                    --      "GQA" (RoPE + GQA)
 ATTENTION_TYPES = ("gsxa", "gated", "xsa", "scalable_gqa", "gqa")
-# Activation of the per-head gate g1 (``gate_activation``): "sigmoid" (default) or
-# "linear" (g1 as is) -- the form the checkpoints of the README's ablation were
-# trained with; the converter sets it for them.
+# Activation of the per-head gate g1 (``gate_activation``): "sigmoid" (the
+# specification and default) or "linear" (g1 as is), kept only for NexteraBERTv2
+# exports that predate the sigmoid gate.
 GATE_ACTIVATIONS = ("sigmoid", "linear")
 CLASSIFIER_POOLINGS = ("mean", "cls")
 

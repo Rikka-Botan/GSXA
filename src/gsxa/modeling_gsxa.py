@@ -185,7 +185,7 @@ class GSXAAttention(nn.Module):
 
     def _activate(self, g1: torch.Tensor) -> torch.Tensor:
         """The per-head gate: ``sigmoid(g1)``, or ``g1`` itself under
-        ``gate_activation="linear"`` (the form the ablation checkpoints used)."""
+        ``gate_activation="linear"`` (older NexteraBERTv2 exports only)."""
         return torch.sigmoid(g1) if self.gate_activation == "sigmoid" else g1
 
     def output_transform(self, o: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
