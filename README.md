@@ -161,18 +161,61 @@ evaluation windows and masks.
 
 ## Speed
 
-Encoder forward pass with `torch.compile`, 32 × 1,024 tokens, bf16, one RTX 5080.
-The models are timed in 10 interleaved rounds, each the median of 50 forwards. The
-table gives the mean ± 95 % CI over the rounds. The change vs GQA is paired within
-each round.
+One RTX 5080 (16 GB), PyTorch 2.12.1 + CUDA 13.2, `torch.compile` (default mode),
+`base` configuration with random weights. The models are timed in 10 interleaved
+rounds, each the median of 50 calls. Tables give the mean ± 95 % CI over the rounds.
+The change vs GQA is paired within each round.
+
+### Inference
+
+Encoder forward under `torch.inference_mode`, 32 × 1,024 tokens, bf16 weights.
 
 | | GSXA | Gated Attention | XSA | Scalable GQA | GQA |
 |:--|--:|--:|--:|--:|--:|
 | latency (ms) | 82.14 ± 0.09 | 81.14 ± 0.08 | 81.70 ± 0.08 | 80.29 ± 0.08 | 80.22 ± 0.07 |
 | vs GQA | +2.39 ± 0.11 % | +1.14 ± 0.11 % | +1.84 ± 0.11 % | +0.08 ± 0.11 % | — |
 
-To reproduce: `python benchmarks/benchmark_inference.py`, then
-`python benchmarks/make_tables.py <result json>`.
+### Training
+
+One training step of the encoder, 32 × 1,024 tokens: the forward with gradients
+enabled, then the backward from a fixed random output gradient. Mixed precision: fp32
+weights and gradients, bf16 compute under `torch.autocast`. No optimizer step and no
+MLM head (both cost the same for every variant). Forward and backward are timed
+separately, with the GPU synchronised between them.
+
+Peak memory is `torch.cuda.max_memory_allocated` (and `max_memory_reserved`), each
+model measured alone in a fresh process, reset before the forward and again before
+the backward. It covers the fp32 weights (0.38 GiB), the parameter gradients, the
+saved activations, the inputs and the output gradient. It excludes optimizer state.
+
+| | GSXA | Gated Attention | XSA | Scalable GQA | GQA |
+|:--|--:|--:|--:|--:|--:|
+| forward (ms) | 89.89 ± 0.09 | 88.15 ± 0.08 | 88.97 ± 0.09 | 86.56 ± 0.09 | 86.37 ± 0.08 |
+| backward (ms) | 184.19 ± 0.17 | 181.27 ± 0.16 | 180.33 ± 0.16 | 176.67 ± 0.14 | 178.34 ± 0.17 |
+| forward + backward (ms) | 274.12 ± 0.25 | 269.49 ± 0.22 | 269.40 ± 0.25 | 263.29 ± 0.25 | 264.75 ± 0.25 |
+| vs GQA | +3.54 ± 0.04 % | +1.79 ± 0.04 % | +1.76 ± 0.04 % | −0.55 ± 0.02 % | — |
+| peak memory, forward (GiB) | 12.48 | 11.14 | 12.46 | 10.57 | 10.00 |
+| peak memory, backward (GiB) | 12.40 | 11.06 | 12.38 | 10.48 | 9.92 |
+| peak reserved (GiB) | 12.74 | 11.43 | 12.72 | 10.86 | 10.29 |
+| peak memory vs GQA | +24.8 % | +11.3 % | +24.6 % | +5.6 % | — |
+
+At 8 × 4,096 tokens (the same token count) the peak memory is identical. The
+latencies are:
+
+| | GSXA | Gated Attention | XSA | Scalable GQA | GQA |
+|:--|--:|--:|--:|--:|--:|
+| forward (ms) | 158.21 ± 0.11 | 156.44 ± 0.06 | 157.36 ± 0.05 | 154.88 ± 0.05 | 154.55 ± 0.02 |
+| backward (ms) | 406.30 ± 0.27 | 403.35 ± 0.27 | 402.80 ± 0.32 | 399.03 ± 0.37 | 400.87 ± 0.28 |
+| forward + backward (ms) | 564.49 ± 0.29 | 559.79 ± 0.26 | 560.09 ± 0.31 | 553.85 ± 0.38 | 555.46 ± 0.32 |
+| vs GQA | +1.63 ± 0.04 % | +0.78 ± 0.04 % | +0.83 ± 0.03 % | −0.29 ± 0.02 % | — |
+
+To reproduce:
+
+```bash
+python benchmarks/benchmark_inference.py
+python benchmarks/benchmark_training.py     # --shape, --precision bf16, --types ...
+python benchmarks/make_tables.py benchmarks/results/<result json>
+```
 
 ## Usage
 
